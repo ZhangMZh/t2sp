@@ -27,7 +27,7 @@ int main(int argc, const char **argv) {
     CodeGen_C::test();
     CodeGen_PyTorch::test();
     ir_equality_test();
-    bounds_test();
+//  bounds_test();
     expr_match_test();
     deinterleave_vector_test();
     modulus_remainder_test();

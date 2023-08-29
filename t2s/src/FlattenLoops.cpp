@@ -277,7 +277,7 @@ class ConstLoopFlattening : public IRMutator {
     }
 
     Stmt visit(const For* op) override {
-        if ((op->for_type != ForType::Serial || !is_open_cl) && 
+        if ((op->for_type != ForType::Serial || !is_open_cl) &&
             (op->device_api == DeviceAPI::OpenCL || op->device_api == DeviceAPI::OneAPI)) {
             is_open_cl = true;
             return IRMutator::visit(op);
@@ -935,59 +935,67 @@ private:
                     // This loop is enclosed by a condition
                     continue;
                 }
-                if (is_reuse_loop[j]) {
-                    reuse_loops_extents_prod *= current_extents[j];
-                    debug(2) << "Reuse loop: " << current_loops[j]
-                             << ", extent: " << current_extents[j] << "\n";
-                } else {
-                    if (!equal(reuse_loops_extents_prod, 1)) {
-                        // Remove the part of the index for the contiguous reuse loops under this non-reuse loop together
-                        index = (temp/(reuse_loops_extents_prod*inner_loops_extents_prod)) * inner_loops_extents_prod
-                                + index % inner_loops_extents_prod;
-                        reuse_loops_extents_prod = Expr(1);
-                    }
-                    if (is_const(mins[j])) {
-                        inner_loops_extents_prod *= current_extents[j];
+                if (is_const(mins[j])) {
+                    if (is_reuse_loop[j]) {
+                        reuse_loops_extents_prod *= current_extents[j];
+                        debug(2) << "Reuse loop: " << current_loops[j]
+                                << ", extent: " << current_extents[j] << "\n";
                     } else {
-                        // Triangular loop.
-                        auto var = mins[j].as<Variable>();
-                        internal_assert(var);
-                        auto ori_bound = simplify(current_extents[j] + mins[j]);
-                        // Currently we assume the loop on which a triangular loop depends should at the outermost
-                        internal_assert(current_loops[0] == extract_last_token(var->name));
-                        if (j == 1) break; // No reuse loop. Jump out of it.
-
-                        // Use the original loop instead of addr.temp
-                        index = simplify(substitute(temp, temp % (reuse_loops_extents_prod*inner_loops_extents_prod), index));
-                        auto cur_loop = Variable::make(Int(32), loop_prefix + "." + current_loops[j]);
-                        if (is_reuse_loop[0]) {
-                            // Case 1: The outer loop is reuse loop. Use the original bound.
-                            index = cur_loop*inner_loops_extents_prod + index;
-                            inner_loops_extents_prod *= ori_bound;
-                            for (int k = j-1; k > 0; k--) {
-                                if (!is_reuse_loop[k]) {
-                                    cur_loop = Variable::make(Int(32), loop_prefix + "." + current_loops[k]);
-                                    index = cur_loop*inner_loops_extents_prod + index;
-                                    inner_loops_extents_prod *= current_extents[k];
-                                }
-                            }
-                        } else {
-                            // Case 2: The outer loop is not reuse loop. Flatten the triangular loop.
-                            auto flattened_iter = simplify((2*ori_bound-mins[j]+1)*mins[j]/2 + (cur_loop-mins[j]));
-                            index = flattened_iter*(reuse_loops_extents_prod*inner_loops_extents_prod) + index;
-                            debug(4) << "Flattening triangular loop " << mins[j] << " and " << cur_loop << " as " << flattened_iter << "\n";
-                            for (int k = j-1; k > 0; k--) {
-                                internal_assert(is_reuse_loop[k]);
-                            }
+                        if (!equal(reuse_loops_extents_prod, 1)) {
+                            // Remove the part of the index for the contiguous reuse loops under this non-reuse loop together
+                            index = (temp/(reuse_loops_extents_prod*inner_loops_extents_prod)) * inner_loops_extents_prod
+                                    + index % inner_loops_extents_prod;
+                            reuse_loops_extents_prod = Expr(1);
                         }
-                        break;
+                        inner_loops_extents_prod *= current_extents[j];
                     }
                     debug(2) << "Non-reuse loop: " << current_loops[j]
                              << ", extent: " << current_extents[j] << "\n";
+                } else {
+                    // Triangular loop.
+                    auto var = mins[j].as<Variable>();
+                    internal_assert(var);
+                    auto ori_bound = simplify(current_extents[j] + mins[j]);
+                    // Currently we assume the loop on which a triangular loop depends should at the outermost
+                    internal_assert(current_loops[0] == extract_last_token(var->name));
+                    bool has_reuse_loop = false;
+                    for (int k = j; k >= 0; k--) {
+                        if (is_reuse_loop[k]) has_reuse_loop = true;
+                    }
+                    if (!has_reuse_loop) {
+                        // No reuse loop. The producer and consumer have the same order.
+                        break;
+                    }
+                    // Use the original loop instead of addr.temp
+                    index = simplify(substitute(temp, temp % (reuse_loops_extents_prod*inner_loops_extents_prod), index));
+                    auto cur_loop = Variable::make(Int(32), loop_prefix + "." + current_loops[j]);
+                    if (is_reuse_loop[0] || is_reuse_loop[j]) {
+                        // Case 1: One of the two loops is reuse loop. Use the original bound.
+                        if (!is_reuse_loop[j]) {
+                            index = cur_loop*inner_loops_extents_prod + index;
+                            inner_loops_extents_prod *= ori_bound;
+                        }
+                        for (int k = j-1; k >= 0; k--) {
+                            if (!is_reuse_loop[k]) {
+                                cur_loop = Variable::make(Int(32), loop_prefix + "." + current_loops[k]);
+                                index = cur_loop*inner_loops_extents_prod + index;
+                                inner_loops_extents_prod *= current_extents[k];
+                            }
+                        }
+                    } else {
+                        // Case 2: The outer loop is not reuse loop. Flatten the triangular loop.
+                        auto flattened_iter = simplify((2*ori_bound-mins[j]+1)*mins[j]/2 + (cur_loop-mins[j]));
+                        index = flattened_iter*(reuse_loops_extents_prod*inner_loops_extents_prod) + index;
+                        debug(4) << "Flattening triangular loop " << mins[j] << " and " << cur_loop << " as " << flattened_iter << "\n";
+                        for (int k = j-1; k > 0; k--) {
+                            internal_assert(is_reuse_loop[k]);
+                        }
+                    }
+                    break;
                 }
             }
             if (!equal(reuse_loops_extents_prod, 1)) {
-                // Remove the part of the index for the contiguous reuse loops starting from the outermost level 
+                // Remove the part of the index for the contiguous reuse loops starting from the outermost level
                 index = index % inner_loops_extents_prod;
             }
             mem_addr[name] = simplify(index);
@@ -1021,7 +1029,8 @@ private:
     string current_loop;                                     // Current serial or unroll loop
     string loop_enclosing_mem_channel_access;                // The loop that immediately encloses a read/write_mem_channel
     int num_mem_channel_accesses;                            // With loop unrolling, there might be multiple accesses to a channel
-    Expr path_condition;                                     // The path condition to a read/write_mem_channel
+    Expr path_condition;                                     // Current path condition
+    Expr read_condition;                                     // Path condition that encloses the read to a memory channel
     Expr single_PE_condition;                                // The part of the path condition that checks for a single PE.
                                                              // E.g. given path condition "some cond && u0=0 && u1=0", where u0 and u1
                                                              // are unrolled loops, the single_PE_condition = "u0=0 && u1=0".
@@ -1135,10 +1144,13 @@ public:
             in_function = true;
             on_device = false;
             unrolled_loops.clear();
-            current_loop.clear();
+            // The initial value of current_loop should be "outermost loop"
+            // to handle functions without any loops.
+            current_loop = op->name + ".s0.__outermost";
             loop_enclosing_mem_channel_access.clear();
             num_mem_channel_accesses = 0;
             path_condition = const_true();
+            read_condition = const_true();
             single_PE_condition = const_true();
         } else {
             in_function = false;
@@ -1206,8 +1218,8 @@ public:
             // At least one access exists. However, accesses to partitions (with the same address) are not counted
             int inc_num = num_mem_channel_accesses == 0 ? 1 : num_mem_channel_accesses;
             Stmt inc = Provide::make("addr.temp", {Call::make(Int(32), "addr.temp", {}, Call::Intrinsic) + inc_num}, {});
-            if (!equal(single_PE_condition, const_true())) {
-                inc = IfThenElse::make(single_PE_condition, inc);
+            if (!equal(read_condition, const_true())) {
+                inc = IfThenElse::make(read_condition, inc);
             }
             body = Block::make(body, inc);
         }
@@ -1320,6 +1332,7 @@ public:
             loop_enclosing_mem_channel_access = current_loop;
             vector<string> unrolled_loops_without_terms;
             check_is_single_PE(on_device, path_condition, unrolled_loops, {}, single_PE_condition, unrolled_loops_without_terms);
+            read_condition = path_condition;
 
             internal_assert(op->args[0].as<StringImm>());
             string name = op->args[0].as<StringImm>()->value;

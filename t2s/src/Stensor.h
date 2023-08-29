@@ -36,9 +36,12 @@ enum Starget {
     IntelFPGA
 };
 
+struct FuncOrStensor;
+
 struct Stensor
 {
     std::string name;
+    std::string producer;
     SMemType position;
     Var v_scope;
     vector<Var> v_width;
@@ -47,11 +50,14 @@ struct Stensor
     vector<Expr> dims;
     int schain_idx = -1;
     int fifo_depth = 0;
+    bool transposed = false;
 
     Stensor(std::string _n, SMemType _p)
         : name(_n), position(_p) {}
     Stensor(std::string _n)
         : Stensor(_n, HOST) {}
+    Stensor(void)
+        : Stensor(unique_name("s"), HOST) {}
 
     Func stensor_realize_wrapper(Starget t);
     void realize(Buffer<> dst, Starget t);
@@ -59,7 +65,8 @@ struct Stensor
     void compile_to_host(string file_name, const vector<Argument> &args,
                          const std::string fn_name, Starget t);
     void compile_to_oneapi(const vector<Argument> &args,
-                         const std::string fn_name, Starget t);
+                           const std::string fn_name, Starget t);
+    Stensor &transpose(void);
     Stensor &scope(Var v);
     Stensor &banks(const std::vector<Var> &banks);
     Stensor &out(const std::vector<Var> &bankwidth_and_banks);
@@ -83,11 +90,28 @@ struct Stensor
         std::vector<Var> collected_args{v, std::forward<Args>(args)...};
         return this->out(collected_args);
     }
-
     Stensor &operator>>(Stensor &s);
-    friend Stensor &operator>>(const ImageParam &im, Stensor &s);
-    friend Stensor &operator>>(const vector<ImageParam> &im, Stensor &s);
-    friend Stensor &operator>>(Func &f, Stensor &s);
+};
+
+void operator>>(Stensor &s, const vector<FuncOrStensor> &fs);
+void operator>>(const ImageParam &im, const vector<FuncOrStensor> &fs);
+void operator>>(const vector<ImageParam> &im, const vector<FuncOrStensor> &fs);
+void operator>>(Stensor &s, Func &f);
+Stensor &operator>>(const ImageParam &im, Stensor &s);
+Stensor &operator>>(const vector<ImageParam> &im, Stensor &s);
+Stensor &operator>>(Func &f, Stensor &s);
+
+struct FuncOrStensor {
+    FuncOrStensor(Func &f)
+        : func(&f) {
+    }
+    FuncOrStensor(Stensor &s)
+        : stensor(&s) {
+    }
+    FuncOrStensor(void) {}
+
+    Func       *func = NULL;      // Func class is undefined at this point, and thus use a pointer
+    Stensor    *stensor = NULL;   // Stensor is undefined at this point, and thus use a pointer
 };
 
 struct FIFO

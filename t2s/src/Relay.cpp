@@ -558,13 +558,19 @@ public:
     Stmt visit(const Realize *op) override {
         Stmt body = mutate(op->body);
         auto it = std::find(funcs.begin(), funcs.end(), op->name);
+        auto ori_bounds = op->bounds;
         if (it != funcs.end()) {
-            Region bounds(op->bounds.size(), Range(0, 1));
+            Region new_bounds(op->bounds.size(), Range(0, 1));
+            // Reorder the storage. Assume the non-const dimensions are stay in place
             for (size_t i = 0; i < loops.size(); i++) {
                 auto &loop_info = ori_loops.at(loops[i]);
-                bounds[i] = Range(loop_info.min, loop_info.extent);
+                if (is_const(loop_info.min)) {
+                    new_bounds[i] = Range(loop_info.min, loop_info.extent);
+                } else {
+                    new_bounds[i] = ori_bounds[i];
+                }
             }
-            return Realize::make(op->name, op->types, op->memory_type, bounds, op->condition, body);
+            return Realize::make(op->name, op->types, op->memory_type, new_bounds, op->condition, body);
         }
         return Realize::make(op->name, op->types, op->memory_type, op->bounds, op->condition, body);
     }

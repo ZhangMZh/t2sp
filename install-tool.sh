@@ -221,7 +221,7 @@ if [ "$component" == "gmp" ]; then
     install_gmp        "6.2.1"
 fi
 if [ "$component" == "mpfr" ]; then
-    install_mpfr       "4.1.0"
+    install_mpfr       "4.2.0"
 fi
 if [ "$component" == "mpc" ]; then
     install_mpc        "1.2.1"
@@ -230,7 +230,7 @@ if [ "$component" == "cmake" ]; then
     install_cmake      "3.15"  "3.15.7"
 fi
 if [ "$component" == "gcc" ]; then
-    install_gcc        "8.4.0"
+    install_gcc        "7.5.0"
 fi
 if [ "$component" == "llvm-clang" ]; then
     install_llvm_clang "90"    "9.0"    "7.5.0"
